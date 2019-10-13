@@ -11,25 +11,25 @@ const SEQ_CAPACITY: usize = MESSAGES;
 const SPSC_CAPACITY: usize = 1024;
 
 fn seq() {
-    let (p, c) = queue::spsc::new(SEQ_CAPACITY);
+    let (mut p, mut c) = queue::spsc::with_capacity(SEQ_CAPACITY);
 
     for i in 0..MESSAGES {
-        p.push(message::new(i)).unwrap();
+        p.try_push(message::new(i)).unwrap();
     }
 
     for _ in 0..MESSAGES {
-        c.pop().unwrap();
+        c.try_pop().unwrap();
     }
 }
 
 fn spsc() {
-    let (p, c) = queue::spsc::new(SPSC_CAPACITY);
+    let (mut p, mut c) = queue::spsc::with_capacity(SPSC_CAPACITY);
 
     crossbeam::scope(|scope| {
         scope.spawn(move |_| {
             let mut i = 0usize;
             while i < MESSAGES {
-                if p.push(message::new(i)).is_ok() {
+                if p.try_push(message::new(i)).is_ok() {
                     i += 1;
                 } else {
                     thread::yield_now();
@@ -39,7 +39,7 @@ fn spsc() {
 
         let mut i = 0usize;
         while i < MESSAGES {
-            if let Ok(message) = c.pop() {
+            if let Ok(message) = c.try_pop() {
                 debug_assert_eq!(i, message.0[0]);
                 i += 1;
             } else {
