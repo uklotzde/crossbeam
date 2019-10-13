@@ -2,8 +2,10 @@ use core::cell::UnsafeCell;
 use core::fmt;
 use core::mem;
 use core::ptr;
-use core::slice;
 use core::sync::atomic::{self, AtomicBool, AtomicUsize, Ordering};
+
+#[cfg(feature = "std")]
+use std::panic::{RefUnwindSafe, UnwindSafe};
 
 use Backoff;
 
@@ -21,7 +23,9 @@ use Backoff;
 /// [`AtomicCell::<T>::is_lock_free()`]: struct.AtomicCell.html#method.is_lock_free
 /// [`Acquire`]: https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html#variant.Acquire
 /// [`Release`]: https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html#variant.Release
-pub struct AtomicCell<T> {
+// TODO(@jeehoonkang): when the minimum supported Rust version is bumped to 1.28+, apply the
+// attribute `#[repr(transparent)]`.
+pub struct AtomicCell<T: ?Sized> {
     /// The inner value.
     ///
     /// If this value can be transmuted into a primitive atomic type, it will be treated as such.
@@ -32,6 +36,11 @@ pub struct AtomicCell<T> {
 
 unsafe impl<T: Send> Send for AtomicCell<T> {}
 unsafe impl<T: Send> Sync for AtomicCell<T> {}
+
+#[cfg(feature = "std")]
+impl<T> UnwindSafe for AtomicCell<T> {}
+#[cfg(feature = "std")]
+impl<T> RefUnwindSafe for AtomicCell<T> {}
 
 impl<T> AtomicCell<T> {
     /// Creates a new atomic cell initialized with `val`.
@@ -47,24 +56,6 @@ impl<T> AtomicCell<T> {
         AtomicCell {
             value: UnsafeCell::new(val),
         }
-    }
-
-    /// Returns a mutable reference to the inner value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crossbeam_utils::atomic::AtomicCell;
-    ///
-    /// let mut a = AtomicCell::new(7);
-    /// *a.get_mut() += 1;
-    ///
-    /// assert_eq!(a.load(), 8);
-    /// ```
-    #[doc(hidden)]
-    #[deprecated(note = "this method is unsound and will be removed in the next release")]
-    pub fn get_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.value.get() }
     }
 
     /// Unwraps the atomic cell and returns its inner value.
@@ -156,6 +147,61 @@ impl<T> AtomicCell<T> {
     }
 }
 
+impl<T: ?Sized> AtomicCell<T> {
+    /// Returns a raw pointer to the underlying data in this atomic cell.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_utils::atomic::AtomicCell;
+    ///
+    /// let mut a = AtomicCell::new(5);
+    ///
+    /// let ptr = a.as_ptr();
+    /// ```
+    #[inline]
+    pub fn as_ptr(&self) -> *mut T {
+        self.value.get()
+    }
+
+    /// Returns a mutable reference to the inner value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_utils::atomic::AtomicCell;
+    ///
+    /// let mut a = AtomicCell::new(7);
+    /// *a.get_mut() += 1;
+    ///
+    /// assert_eq!(a.load(), 8);
+    /// ```
+    #[doc(hidden)]
+    #[deprecated(note = "this method is unsound and will be removed in the next release")]
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.value.get() }
+    }
+}
+
+impl<T: Default> AtomicCell<T> {
+    /// Takes the value of the atomic cell, leaving `Default::default()` in its place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_utils::atomic::AtomicCell;
+    ///
+    /// let a = AtomicCell::new(5);
+    /// let five = a.take();
+    ///
+    /// assert_eq!(five, 5);
+    /// assert_eq!(a.into_inner(), 0);
+    /// ```
+    pub fn take(&self) -> T {
+        self.swap(Default::default())
+    }
+}
+
 impl<T: Copy> AtomicCell<T> {
     /// Loads a value.
     ///
@@ -217,23 +263,8 @@ impl<T: Copy + Eq> AtomicCell<T> {
     /// assert_eq!(a.compare_exchange(1, 2), Ok(1));
     /// assert_eq!(a.load(), 2);
     /// ```
-    pub fn compare_exchange(&self, mut current: T, new: T) -> Result<T, T> {
-        loop {
-            match unsafe { atomic_compare_exchange_weak(self.value.get(), current, new) } {
-                Ok(_) => return Ok(current),
-                Err(previous) => {
-                    if previous != current {
-                        return Err(previous);
-                    }
-
-                    // The compare-exchange operation has failed and didn't store `new`. The
-                    // failure is either spurious, or `previous` was semantically equal to
-                    // `current` but not byte-equal. Let's retry with `previous` as the new
-                    // `current`.
-                    current = previous;
-                }
-            }
-        }
+    pub fn compare_exchange(&self, current: T, new: T) -> Result<T, T> {
+        unsafe { atomic_compare_exchange_weak(self.value.get(), current, new) }
     }
 }
 
@@ -594,15 +625,6 @@ impl<T: Copy + fmt::Debug> fmt::Debug for AtomicCell<T> {
     }
 }
 
-/// Returns `true` if the two values are equal byte-for-byte.
-fn byte_eq<T>(a: &T, b: &T) -> bool {
-    unsafe {
-        let a = slice::from_raw_parts(a as *const _ as *const u8, mem::size_of::<T>());
-        let b = slice::from_raw_parts(b as *const _ as *const u8, mem::size_of::<T>());
-        a == b
-    }
-}
-
 /// Returns `true` if values of type `A` can be transmuted into values of type `B`.
 fn can_transmute<A, B>() -> bool {
     // Sizes must be equal, but alignment of `A` must be greater or equal than that of `B`.
@@ -857,13 +879,12 @@ unsafe fn atomic_store<T>(dst: *mut T, val: T) {
         T, a,
         {
             a = &*(dst as *const _ as *const _);
-            let res = a.store(mem::transmute_copy(&val), Ordering::Release);
+            a.store(mem::transmute_copy(&val), Ordering::Release);
             mem::forget(val);
-            res
         },
         {
             let _guard = lock(dst as usize).write();
-            ptr::write(dst, val)
+            ptr::write(dst, val);
         }
     }
 }
@@ -895,29 +916,46 @@ unsafe fn atomic_swap<T>(dst: *mut T, val: T) -> T {
 ///
 /// This operation uses the `AcqRel` ordering. If possible, an atomic instructions is used, and a
 /// global lock otherwise.
-unsafe fn atomic_compare_exchange_weak<T>(dst: *mut T, current: T, new: T) -> Result<T, T>
+unsafe fn atomic_compare_exchange_weak<T>(dst: *mut T, mut current: T, new: T) -> Result<T, T>
 where
-    T: Copy,
+    T: Copy + Eq,
 {
     atomic! {
         T, a,
         {
             a = &*(dst as *const _ as *const _);
-            let res = a.compare_exchange_weak(
-                mem::transmute_copy(&current),
-                mem::transmute_copy(&new),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
-            match res {
-                Ok(v) => Ok(mem::transmute_copy(&v)),
-                Err(v) => Err(mem::transmute_copy(&v)),
+            let mut current_raw = mem::transmute_copy(&current);
+            let new_raw = mem::transmute_copy(&new);
+
+            loop {
+                match a.compare_exchange_weak(
+                    current_raw,
+                    new_raw,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => break Ok(current),
+                    Err(previous_raw) => {
+                        let previous = mem::transmute_copy(&previous_raw);
+
+                        if !T::eq(&previous, &current) {
+                            break Err(previous);
+                        }
+
+                        // The compare-exchange operation has failed and didn't store `new`. The
+                        // failure is either spurious, or `previous` was semantically equal to
+                        // `current` but not byte-equal. Let's retry with `previous` as the new
+                        // `current`.
+                        current = previous;
+                        current_raw = previous_raw;
+                    }
+                }
             }
         },
         {
             let guard = lock(dst as usize).write();
 
-            if byte_eq(&*dst, &current) {
+            if T::eq(&*dst, &current) {
                 Ok(ptr::replace(dst, new))
             } else {
                 let val = ptr::read(dst);

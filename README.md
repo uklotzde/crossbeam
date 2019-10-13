@@ -10,13 +10,14 @@ https://crates.io/crates/crossbeam)
 https://docs.rs/crossbeam)
 [![Rust 1.28+](https://img.shields.io/badge/rust-1.28+-lightgray.svg)](
 https://www.rust-lang.org)
+[![chat](https://img.shields.io/discord/569610676205781012.svg?logo=discord)](https://discord.gg/JXYwgWZ)
 
 This crate provides a set of tools for concurrent programming:
 
 #### Atomics
 
-* [`AtomicCell`], a thread-safe mutable memory location.<sup>(\*)</sup>
-* [`AtomicConsume`], for reading from primitive atomic types with "consume" ordering.<sup>(\*)</sup>
+* [`AtomicCell`], a thread-safe mutable memory location.<sup>(no_std)</sup>
+* [`AtomicConsume`], for reading from primitive atomic types with "consume" ordering.<sup>(no_std)</sup>
 
 #### Data structures
 
@@ -27,7 +28,7 @@ This crate provides a set of tools for concurrent programming:
 
 #### Memory management
 
-* [`epoch`], an epoch-based garbage collector.<sup>(\*\*)</sup>
+* [`epoch`], an epoch-based garbage collector.<sup>(alloc)</sup>
 
 #### Thread synchronization
 
@@ -38,12 +39,13 @@ This crate provides a set of tools for concurrent programming:
 
 #### Utilities
 
-* [`Backoff`], for exponential backoff in spin loops.<sup>(\*)</sup>
-* [`CachePadded`], for padding and aligning a value to the length of a cache line.<sup>(\*)</sup>
+* [`Backoff`], for exponential backoff in spin loops.<sup>(no_std)</sup>
+* [`CachePadded`], for padding and aligning a value to the length of a cache line.<sup>(no_std)</sup>
 * [`scope`], for spawning threads that borrow local variables from the stack.
 
-*Features marked with <sup>(\*)</sup> can be used in `no_std` environments.*<br/>
-*Features marked with <sup>(\*\*)</sup> can be used in `no_std` + `alloc` environments.*
+*Features marked with <sup>(no_std)</sup> can be used in `no_std` environments.*<br/>
+*Features marked with <sup>(alloc)</sup> can be used in `no_std` environments, but only if `alloc`
+and `nightly` are enabled.*
 
 [`AtomicCell`]: https://docs.rs/crossbeam/*/crossbeam/atomic/struct.AtomicCell.html
 [`AtomicConsume`]: https://docs.rs/crossbeam/*/crossbeam/atomic/trait.AtomicConsume.html

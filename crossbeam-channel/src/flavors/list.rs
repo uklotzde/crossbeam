@@ -119,6 +119,7 @@ struct Position<T> {
 }
 
 /// The token type for the list flavor.
+#[derive(Debug)]
 pub struct ListToken {
     /// The block of slots.
     block: *const u8,
@@ -447,6 +448,12 @@ impl<T> Channel<T> {
                 }
             }
 
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Err(RecvTimeoutError::Timeout);
+                }
+            }
+
             // Prepare for blocking until a sender wakes us up.
             Context::with(|cx| {
                 let oper = Operation::hook(token);
@@ -470,12 +477,6 @@ impl<T> Channel<T> {
                     Selected::Operation(_) => {}
                 }
             });
-
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    return Err(RecvTimeoutError::Timeout);
-                }
-            }
         }
     }
 

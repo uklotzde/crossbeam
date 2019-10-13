@@ -348,7 +348,6 @@
 #![warn(missing_debug_implementations)]
 
 extern crate crossbeam_utils;
-extern crate smallvec;
 
 mod channel;
 mod context;
@@ -359,6 +358,13 @@ mod select;
 mod select_macro;
 mod utils;
 mod waker;
+
+/// Crate internals used by the `select!` macro.
+#[doc(hidden)]
+pub mod internal {
+    pub use select::SelectHandle;
+    pub use select::{select, select_timeout, try_select};
+}
 
 pub use channel::{after, never, tick};
 pub use channel::{bounded, unbounded};

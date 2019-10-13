@@ -10,13 +10,14 @@ https://crates.io/crates/crossbeam-utils)
 https://docs.rs/crossbeam-utils)
 [![Rust 1.26+](https://img.shields.io/badge/rust-1.26+-lightgray.svg)](
 https://www.rust-lang.org)
+[![chat](https://img.shields.io/discord/569610676205781012.svg?logo=discord)](https://discord.gg/BBYwKq)
 
 This crate provides miscellaneous tools for concurrent programming:
 
 #### Atomics
 
-* [`AtomicCell`], a thread-safe mutable memory location.<sup>(\*)</sup>
-* [`AtomicConsume`], for reading from primitive atomic types with "consume" ordering.<sup>(\*)</sup>
+* [`AtomicCell`], a thread-safe mutable memory location.<sup>(no_std)</sup>
+* [`AtomicConsume`], for reading from primitive atomic types with "consume" ordering.<sup>(no_std)</sup>
 
 #### Thread synchronization
 
@@ -26,11 +27,11 @@ This crate provides miscellaneous tools for concurrent programming:
 
 #### Utilities
 
-* [`Backoff`], for exponential backoff in spin loops.<sup>(\*)</sup>
-* [`CachePadded`], for padding and aligning a value to the length of a cache line.<sup>(\*)</sup>
+* [`Backoff`], for exponential backoff in spin loops.<sup>(no_std)</sup>
+* [`CachePadded`], for padding and aligning a value to the length of a cache line.<sup>(no_std)</sup>
 * [`scope`], for spawning threads that borrow local variables from the stack.
 
-*Features marked with <sup>(\*)</sup> can be used in `no_std` environments.*
+*Features marked with <sup>(no_std)</sup> can be used in `no_std` environments.*<br/>
 
 [`AtomicCell`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/atomic/struct.AtomicCell.html
 [`AtomicConsume`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/atomic/trait.AtomicConsume.html

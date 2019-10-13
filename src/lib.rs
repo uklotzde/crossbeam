@@ -47,7 +47,6 @@
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "nightly", feature(alloc))]
 #![cfg_attr(feature = "nightly", feature(cfg_target_has_atomic))]
 
 #[macro_use]
@@ -56,13 +55,10 @@ extern crate cfg_if;
 extern crate core;
 
 cfg_if! {
-    if #[cfg(feature = "nightly")] {
+    if #[cfg(feature = "alloc")] {
         extern crate alloc;
-    } else {
-        mod alloc {
-            extern crate std;
-            pub use self::std::*;
-        }
+    } else if #[cfg(feature = "std")] {
+        extern crate std as alloc;
     }
 }
 
@@ -74,6 +70,10 @@ pub use _epoch::crossbeam_epoch as epoch;
 
 extern crate crossbeam_utils;
 
+#[cfg_attr(
+    feature = "nightly",
+    cfg(all(target_has_atomic = "cas", target_has_atomic = "ptr"))
+)]
 pub use crossbeam_utils::atomic;
 
 /// Miscellaneous utilities.

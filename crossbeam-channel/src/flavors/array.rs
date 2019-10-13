@@ -37,6 +37,7 @@ struct Slot<T> {
 }
 
 /// The token type for the array flavor.
+#[derive(Debug)]
 pub struct ArrayToken {
     /// Slot to read from or write to.
     slot: *const u8,
@@ -359,6 +360,12 @@ impl<T> Channel<T> {
                 }
             }
 
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Err(SendTimeoutError::Timeout(msg));
+                }
+            }
+
             Context::with(|cx| {
                 // Prepare for blocking until a receiver wakes us up.
                 let oper = Operation::hook(token);
@@ -380,12 +387,6 @@ impl<T> Channel<T> {
                     Selected::Operation(_) => {}
                 }
             });
-
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    return Err(SendTimeoutError::Timeout(msg));
-                }
-            }
         }
     }
 
@@ -419,6 +420,12 @@ impl<T> Channel<T> {
                 }
             }
 
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Err(RecvTimeoutError::Timeout);
+                }
+            }
+
             Context::with(|cx| {
                 // Prepare for blocking until a sender wakes us up.
                 let oper = Operation::hook(token);
@@ -442,12 +449,6 @@ impl<T> Channel<T> {
                     Selected::Operation(_) => {}
                 }
             });
-
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    return Err(RecvTimeoutError::Timeout);
-                }
-            }
         }
     }
 
