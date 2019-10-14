@@ -167,6 +167,28 @@ impl<T> Shared<T> {
         debug_assert!(skip_pos >= n1 || skip_pos == n2);
         (skip_pos, (n1, n2))
     }
+
+    /// Splits the shared queue into producer/consumer sides.
+    fn split(self) -> (Producer<T>, Consumer<T>) {
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Relaxed);
+
+        let shared = Arc::new(self);
+
+        let producer = Producer {
+            shared: shared.clone(),
+            head: Cell::new(head),
+            tail: Cell::new(tail),
+        };
+
+        let consumer = Consumer {
+            shared,
+            head: Cell::new(head),
+            tail: Cell::new(tail),
+        };
+
+        (producer, consumer)
+    }
 }
 
 impl<T> Drop for Shared<T> {
@@ -208,26 +230,12 @@ impl<T> Drop for Shared<T> {
 pub fn with_capacity<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
     let size = capacity + 1; // one free empty slot
 
-    let shared = Arc::new(Shared {
+    Shared {
         head: CachePadded::new(AtomicUsize::new(0)),
         tail: CachePadded::new(AtomicUsize::new(0)),
         buffer: Buffer::alloc(size),
         free_buffer: true,
-    });
-
-    let producer = Producer {
-        shared: shared.clone(),
-        head: Cell::new(0),
-        tail: Cell::new(0),
-    };
-
-    let consumer = Consumer {
-        shared,
-        head: Cell::new(0),
-        tail: Cell::new(0),
-    };
-
-    (producer, consumer)
+    }.split()
 }
 
 /// Constructs a bounded, single-producer/single-consumer queue on
@@ -249,26 +257,12 @@ pub fn new<T, D>(buffer: Buffer<T>) -> (Producer<T>, Consumer<T>) {
         buffer.size > 0,
         "at least one free empty slot in the buffer is required"
     );
-    let shared = Arc::new(Shared {
+    Shared {
         head: CachePadded::new(AtomicUsize::new(0)),
         tail: CachePadded::new(AtomicUsize::new(0)),
         buffer,
         free_buffer: false,
-    });
-
-    let producer = Producer {
-        shared: shared.clone(),
-        head: Cell::new(0),
-        tail: Cell::new(0),
-    };
-
-    let consumer = Consumer {
-        shared,
-        head: Cell::new(0),
-        tail: Cell::new(0),
-    };
-
-    (producer, consumer)
+    }.split()
 }
 
 /// Error results that might occur when trying to pop values from a queue.
