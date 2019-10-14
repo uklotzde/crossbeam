@@ -244,7 +244,6 @@ impl<T> Drop for Shared<T> {
     }
 }
 
-
 /// Constructs a bounded, single-producer/single-consumer queue with
 /// the specified capacity.
 ///
@@ -261,7 +260,8 @@ pub fn with_capacity<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
         tail: CachePadded::new(UnsafeCell::new(AtomicUsize::new(0))),
         buffer: Buffer::alloc(size),
         free_buffer: true,
-    }.split()
+    }
+    .split()
 }
 
 /// Constructs a bounded, single-producer/single-consumer queue on
@@ -288,7 +288,8 @@ pub fn new<T, D>(buffer: Buffer<T>) -> (Producer<T>, Consumer<T>) {
         tail: CachePadded::new(UnsafeCell::new(AtomicUsize::new(0))),
         buffer,
         free_buffer: false,
-    }.split()
+    }
+    .split()
 }
 
 /// Error results that might occur when trying to pop values from a queue.
@@ -351,23 +352,21 @@ impl<T> Producer<T> {
     }
 
     #[inline]
+    fn update_head(&mut self, head: usize) {
+        self.shared.head().store(head, Ordering::Release);
+    }
+
+    #[inline]
     fn tail(&self) -> usize {
         self.cached_tail.get()
     }
 
-    /// Refreshes the cached tail.
     #[inline]
     fn refresh_tail(&self) -> usize {
         let tail = self.shared.tail().load(Ordering::Acquire);
         debug_assert!(tail < self.shared.buffer.size);
         self.cached_tail.set(tail);
         tail
-    }
-
-    /// Updates both the shared and the cached head.
-    #[inline]
-    fn update_head(&mut self, head: usize) {
-        self.shared.head().store(head, Ordering::Release);
     }
 
     #[inline]
@@ -596,14 +595,6 @@ impl<T> Consumer<T> {
     }
 
     #[inline]
-    fn tail(&self) -> usize {
-        // Unsynchronized access of the underlying atomic value is
-        // permitted, because the consumer is the only writer!!
-        unsafe { self.shared.tail_unsync() }
-    }
-
-    /// Refreshes the cached head.
-    #[inline]
     fn refresh_head(&self) -> usize {
         let head = self.shared.head().load(Ordering::Acquire);
         debug_assert!(head < self.shared.buffer.size);
@@ -611,7 +602,13 @@ impl<T> Consumer<T> {
         head
     }
 
-    /// Updates both the shared and the cached head.
+    #[inline]
+    fn tail(&self) -> usize {
+        // Unsynchronized access of the underlying atomic value is
+        // permitted, because the consumer is the only writer!!
+        unsafe { self.shared.tail_unsync() }
+    }
+
     #[inline]
     fn update_tail(&mut self, tail: usize) {
         self.shared.tail().store(tail, Ordering::Release);
