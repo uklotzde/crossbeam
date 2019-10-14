@@ -205,12 +205,12 @@ impl<T> Shared<T> {
 
         let producer = Producer {
             shared: shared.clone(),
-            cached_tail: Cell::new(tail),
+            cached_tail: CachePadded::new(Cell::new(tail)),
         };
 
         let consumer = Consumer {
             shared,
-            cached_head: Cell::new(head),
+            cached_head: CachePadded::new(Cell::new(head)),
         };
 
         (producer, consumer)
@@ -338,7 +338,7 @@ pub struct Producer<T> {
     ///
     /// This value can become stale and then needs to be resynchronized
     /// with the shared tail that is updated by the consumer.
-    cached_tail: Cell<usize>,
+    cached_tail: CachePadded<Cell<usize>>,
 }
 
 unsafe impl<T: Send> Send for Producer<T> {}
@@ -583,7 +583,7 @@ pub struct Consumer<T> {
     ///
     /// This value can become stale and then needs to be resynchronized
     /// with the shared head that is updated by the producer.
-    cached_head: Cell<usize>,
+    cached_head: CachePadded<Cell<usize>>,
 }
 
 unsafe impl<T: Send> Send for Consumer<T> {}
