@@ -377,6 +377,7 @@ impl<T> Producer<T> {
     ///
     /// assert_eq!(c.capacity(), 100);
     /// ```
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.shared.capacity()
     }
@@ -395,6 +396,7 @@ impl<T> Producer<T> {
     /// // Producer has not been refreshed yet
     /// assert_eq!(p.peek(), 0);
     /// ```
+    #[inline]
     pub fn peek(&self) -> usize {
         self.acquire_writable(0).1
     }
@@ -416,6 +418,7 @@ impl<T> Producer<T> {
     /// assert_eq!(p.peek_min(1), 1);
     /// assert_eq!(p.peek_min(2), 1);
     /// ```
+    #[inline]
     pub fn peek_min(&self, min_count: usize) -> usize {
         self.acquire_writable(min_count).1
     }
@@ -433,6 +436,7 @@ impl<T> Producer<T> {
     ///
     /// assert_eq!(p.peek_max(), 1);
     /// ```
+    #[inline]
     pub fn peek_max(&self) -> usize {
         self.peek_min(self.shared.buffer.size)
     }
@@ -507,6 +511,7 @@ impl<T: Copy + Default> Producer<T> {
     /// Obtains two contiguous slices for writing.
     ///
     /// See also: [`writable_slices_raw`](#method.writable_slices_raw)
+    #[inline]
     pub fn writable_slices(&mut self, min_count: usize) -> (&mut [T], &mut [T]) {
         unsafe { self.writable_slices_raw(min_count) }
     }
@@ -621,21 +626,25 @@ impl<T> Consumer<T> {
     ///
     /// assert_eq!(c.capacity(), 100);
     /// ```
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.shared.capacity()
     }
 
     /// Returns how many slots are immediately available for reading.
+    #[inline]
     pub fn peek(&self) -> usize {
         self.acquire_readable(0).1
     }
 
     /// Returns how many slots are available for reading given a minimum amount.
+    #[inline]
     pub fn peek_min(&self, min_count: usize) -> usize {
         self.acquire_readable(min_count).1
     }
 
     /// Returns how many slots are actually available for reading.
+    #[inline]
     pub fn peek_max(&self) -> usize {
         self.peek_min(self.shared.buffer.size)
     }
@@ -739,6 +748,7 @@ impl<T: Copy> Consumer<T> {
     /// Obtains two contiguous slices for reading.
     ///
     /// See also: [`readable_slices_raw`](#method.readable_slices_raw)
+    #[inline]
     pub fn readable_slices(&self, min_count: usize) -> (&[T], &[T]) {
         unsafe { self.readable_slices_raw(min_count) }
     }
