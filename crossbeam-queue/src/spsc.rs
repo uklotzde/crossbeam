@@ -125,19 +125,15 @@ impl<T> Buffer<T> {
 #[derive(Debug)]
 struct Shared<T> {
     /// Keeps track of the next slot that is writable.
-    /// UnsafeCell is needed to allow accessing the underlying value
-    /// without synchronization from the producer as the only writer.
     head: PaddedAtomicUsize,
 
     /// Keeps track of the first slot that is readable.
-    /// UnsafeCell is needed to allow accessing the underlying value
-    /// without synchronization from the consumer as the only writer.
     tail: PaddedAtomicUsize,
 
     /// The internal slot buffer.
     buffer: Buffer<T>,
 
-    /// Flag that indicated if the buffer's memory needs to be freed.
+    /// Flag that indicates if the buffer's memory needs to be freed.
     free_buffer: bool,
 }
 
@@ -400,9 +396,9 @@ impl<T> Producer<T> {
     /// ```
     /// use crossbeam_queue::spsc;
     ///
-    /// let (p, c) = spsc::with_capacity::<i32>(100);
+    /// let (p, _) = spsc::with_capacity::<i32>(100);
     ///
-    /// assert_eq!(c.capacity(), 100);
+    /// assert_eq!(p.capacity(), 100);
     /// ```
     #[inline]
     pub fn capacity(&self) -> usize {
@@ -645,7 +641,7 @@ impl<T> Consumer<T> {
     /// ```
     /// use crossbeam_queue::spsc;
     ///
-    /// let (p, c) = spsc::with_capacity::<i32>(100);
+    /// let (_, c) = spsc::with_capacity::<i32>(100);
     ///
     /// assert_eq!(c.capacity(), 100);
     /// ```
