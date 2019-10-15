@@ -20,6 +20,7 @@ use std::{
     cell::{Cell, UnsafeCell},
     error::Error,
     fmt,
+    ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -30,6 +31,33 @@ use std::{
 use std::mem;
 
 use crossbeam_utils::CachePadded;
+
+// UnsafeCell is needed to allow accessing the underlying value
+// without synchronization from the producer as the only writer.
+#[derive(Debug)]
+struct PaddedAtomicUsize(CachePadded<UnsafeCell<AtomicUsize>>);
+
+impl Deref for PaddedAtomicUsize {
+    type Target = AtomicUsize;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        // Safely access the contents of the UnsafeCell through a shared reference
+        unsafe { &*self.0.get() }
+    }
+}
+
+impl PaddedAtomicUsize {
+    #[inline]
+    pub fn new(value: usize) -> Self {
+        Self(CachePadded::new(UnsafeCell::new(AtomicUsize::new(value))))
+    }
+
+    #[inline]
+    pub unsafe fn load_unsync(&self) -> usize {
+        *(*self.0.get()).get_mut()
+    }
+}
 
 /// The underlying buffer of the queue
 #[derive(Debug)]
@@ -99,12 +127,12 @@ struct Shared<T> {
     /// Keeps track of the next slot that is writable.
     /// UnsafeCell is needed to allow accessing the underlying value
     /// without synchronization from the producer as the only writer.
-    head: CachePadded<UnsafeCell<AtomicUsize>>,
+    head: PaddedAtomicUsize,
 
     /// Keeps track of the first slot that is readable.
     /// UnsafeCell is needed to allow accessing the underlying value
     /// without synchronization from the consumer as the only writer.
-    tail: CachePadded<UnsafeCell<AtomicUsize>>,
+    tail: PaddedAtomicUsize,
 
     /// The internal slot buffer.
     buffer: Buffer<T>,
@@ -114,30 +142,6 @@ struct Shared<T> {
 }
 
 impl<T> Shared<T> {
-    #[inline]
-    fn head(&self) -> &AtomicUsize {
-        // Safely access the contents of the UnsafeCell through a shared reference
-        unsafe { &*self.head.get() }
-    }
-
-    #[inline]
-    unsafe fn head_unsync(&self) -> usize {
-        // Directly read the atomic value without synchronization
-        *(*self.head.get()).get_mut()
-    }
-
-    #[inline]
-    fn tail(&self) -> &AtomicUsize {
-        // Safely access the contents of the UnsafeCell through a shared reference
-        unsafe { &*self.tail.get() }
-    }
-
-    #[inline]
-    unsafe fn tail_unsync(&self) -> usize {
-        // Directly read the atomic value without synchronization
-        *(*self.tail.get()).get_mut()
-    }
-
     #[inline]
     fn capacity(&self) -> usize {
         // One slot must remain empty between writer head and reader tail
@@ -198,8 +202,8 @@ impl<T> Shared<T> {
 
     /// Splits the shared queue into producer/consumer sides.
     fn split(self) -> (Producer<T>, Consumer<T>) {
-        let head = self.head().load(Ordering::Relaxed);
-        let tail = self.tail().load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Relaxed);
 
         let shared = Arc::new(self);
 
@@ -219,8 +223,8 @@ impl<T> Shared<T> {
 
 impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
-        let head = self.head().load(Ordering::Relaxed);
-        let mut tail = self.tail().load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Relaxed);
+        let mut tail = self.tail.load(Ordering::Relaxed);
 
         // Loop over all slots that hold a value and drop them
         while tail != head {
@@ -256,8 +260,8 @@ pub fn with_capacity<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
     let size = capacity + 1; // one free empty slot
 
     Shared {
-        head: CachePadded::new(UnsafeCell::new(AtomicUsize::new(0))),
-        tail: CachePadded::new(UnsafeCell::new(AtomicUsize::new(0))),
+        head: PaddedAtomicUsize::new(0),
+        tail: PaddedAtomicUsize::new(0),
         buffer: Buffer::alloc(size),
         free_buffer: true,
     }
@@ -284,8 +288,8 @@ pub fn new<T, D>(buffer: Buffer<T>) -> (Producer<T>, Consumer<T>) {
         "at least one free empty slot in the buffer is required"
     );
     Shared {
-        head: CachePadded::new(UnsafeCell::new(AtomicUsize::new(0))),
-        tail: CachePadded::new(UnsafeCell::new(AtomicUsize::new(0))),
+        head: PaddedAtomicUsize::new(0),
+        tail: PaddedAtomicUsize::new(0),
         buffer,
         free_buffer: false,
     }
@@ -348,12 +352,12 @@ impl<T> Producer<T> {
     fn head(&self) -> usize {
         // Unsynchronized access of the underlying atomic value is
         // permitted, because the producer is the only writer!!
-        unsafe { self.shared.head_unsync() }
+        unsafe { self.shared.head.load_unsync() }
     }
 
     #[inline]
     fn update_head(&mut self, head: usize) {
-        self.shared.head().store(head, Ordering::Release);
+        self.shared.head.store(head, Ordering::Release);
     }
 
     #[inline]
@@ -363,7 +367,7 @@ impl<T> Producer<T> {
 
     #[inline]
     fn refresh_tail(&self) -> usize {
-        let tail = self.shared.tail().load(Ordering::Acquire);
+        let tail = self.shared.tail.load(Ordering::Acquire);
         debug_assert!(tail < self.shared.buffer.size);
         self.cached_tail.set(tail);
         tail
@@ -596,7 +600,7 @@ impl<T> Consumer<T> {
 
     #[inline]
     fn refresh_head(&self) -> usize {
-        let head = self.shared.head().load(Ordering::Acquire);
+        let head = self.shared.head.load(Ordering::Acquire);
         debug_assert!(head < self.shared.buffer.size);
         self.cached_head.set(head);
         head
@@ -606,12 +610,12 @@ impl<T> Consumer<T> {
     fn tail(&self) -> usize {
         // Unsynchronized access of the underlying atomic value is
         // permitted, because the consumer is the only writer!!
-        unsafe { self.shared.tail_unsync() }
+        unsafe { self.shared.tail.load_unsync() }
     }
 
     #[inline]
     fn update_tail(&mut self, tail: usize) {
-        self.shared.tail().store(tail, Ordering::Release);
+        self.shared.tail.store(tail, Ordering::Release);
     }
 
     #[inline]
