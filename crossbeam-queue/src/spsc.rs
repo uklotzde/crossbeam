@@ -75,17 +75,20 @@ impl<T> Buffer<T> {
         debug_assert!(offset < self.size);
         self.data.add(offset)
     }
+
+    // Cache line pad for both the beginning and the end of the buffer
+    // to avoid false sharing with adjacent allocations, i.e. the minimum
+    // number of elements that span a cache line.
+    #[inline]
+    /*const*/ fn data_cache_pad() -> usize {
+        1 + (mem::size_of::<CachePadded<u8>>() - 1) / mem::size_of::<T>().max(1)
+    }
 }
 
 #[cfg(feature = "std")]
 impl<T> Buffer<T> {
-    // Cache line pad for both the beginning and end of the buffer
-    // to avoid false sharing with adjacent allocations
-    fn data_cache_pad() -> usize {
-        1 + (mem::size_of::<CachePadded<u8>>() - 1) / mem::size_of::<T>().max(1)
-    }
-
-    fn capacity(size: usize) -> usize {
+    #[inline]
+    /*const*/ fn alloc_size(size: usize) -> usize {
         // Insert or account for the implicit cache line pads at the
         // beginning and end of the data!
         size + 2 * Self::data_cache_pad()
@@ -94,9 +97,9 @@ impl<T> Buffer<T> {
     fn alloc(size: usize) -> Self {
         assert!(size > 0, "empty buffer");
         let data = {
-            let capacity = Self::capacity(size);
-            assert!(size < capacity, "size/capacity overflow");
-            let mut v = Vec::<T>::with_capacity(capacity);
+            let alloc_size = Self::alloc_size(size);
+            assert!(size < alloc_size, "size overflow");
+            let mut v = Vec::<T>::with_capacity(alloc_size);
             let ptr = v.as_mut_ptr();
             mem::forget(v);
             // Skip the inserted cache line pad at the beginning of the data!
@@ -107,13 +110,13 @@ impl<T> Buffer<T> {
 
     fn free(&mut self) {
         assert!(self.size > 0, "double free");
-        let capacity = Self::capacity(self.size);
+        let alloc_size = Self::alloc_size(self.size);
         // Account for the inserted cache line pad at the beginning of
         // the data!
         let offset = -(Self::data_cache_pad() as isize);
         unsafe {
             let ptr = self.data.offset(offset);
-            Vec::from_raw_parts(ptr, 0, capacity);
+            Vec::from_raw_parts(ptr, 0, alloc_size);
         }
         // Free the uninitialized memory, i.e. don't drop the elements
         self.size = 0;
@@ -139,19 +142,26 @@ struct Shared<T> {
 
 impl<T> Shared<T> {
     #[inline]
+    /*const*/ fn reserved_size() -> usize {
+        // At least one slot must remain empty between writer head and reader tail!
+        // Reserving enough slots that span a whole cache line avoids false sharing
+        // and cache thrashing when the queue is almost full.
+        Buffer::<T>::data_cache_pad()
+    }
+
+    #[inline]
     fn capacity(&self) -> usize {
-        // One slot must remain empty between writer head and reader tail
-        debug_assert!(self.buffer.size > 0);
-        self.buffer.size - 1
+        debug_assert!(self.buffer.size >= Self::reserved_size());
+        self.buffer.size - Self::reserved_size()
     }
 
     #[inline]
     fn readable_capacity(&self, head: usize, tail: usize) -> usize {
-        // (head + self.buffer.size - tail) % self.buffer.size
         let capacity = if head >= tail {
             head - tail
         } else {
-            self.buffer.size - (tail - head)
+            debug_assert!(tail - head >= Self::reserved_size());
+            self.capacity() - (tail - head - Self::reserved_size())
         };
         debug_assert!(capacity <= self.capacity());
         capacity
@@ -159,14 +169,15 @@ impl<T> Shared<T> {
 
     #[inline]
     fn writable_capacity(&self, head: usize, tail: usize) -> usize {
-        // (tail + (size - 1) - head) % size
-        let capacity = if tail > head {
-            (tail - head) - 1
+        let writable_capacity = if tail > head {
+            debug_assert!(tail - head >= Self::reserved_size());
+            (tail - head) - Self::reserved_size()
         } else {
-            (self.buffer.size - 1) - (head - tail)
+            debug_assert!(head - tail <= self.capacity());
+            self.capacity() - (head - tail)
         };
-        debug_assert!(capacity <= self.capacity());
-        capacity
+        debug_assert!(writable_capacity <= self.capacity());
+        writable_capacity
     }
 
     #[inline]
@@ -253,12 +264,13 @@ impl<T> Drop for Shared<T> {
 /// Returns the producer and the consumer side of the queue.
 #[cfg(feature = "std")]
 pub fn with_capacity<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
-    let size = capacity + 1; // one free empty slot
+    debug_assert!(Shared::<T>::reserved_size() > 0);
+    let buffer_size = capacity + Shared::<T>::reserved_size();
 
     Shared {
         head: PaddedAtomicUsize::new(0),
         tail: PaddedAtomicUsize::new(0),
-        buffer: Buffer::alloc(size),
+        buffer: Buffer::alloc(buffer_size),
         free_buffer: true,
     }
     .split()
@@ -279,9 +291,12 @@ pub fn with_capacity<T>(capacity: usize) -> (Producer<T>, Consumer<T>) {
 ///
 /// Returns the producer and the consumer side of the queue.
 pub fn new<T, D>(buffer: Buffer<T>) -> (Producer<T>, Consumer<T>) {
+    debug_assert!(Shared::<T>::reserved_size() > 0);
     assert!(
-        buffer.size > 0,
-        "at least one free empty slot in the buffer is required"
+        buffer.size >= Shared::<T>::reserved_size(),
+        "buffer size {} < {} is too small for the required reserved slots",
+        buffer.size,
+        Shared::<T>::reserved_size(),
     );
     Shared {
         head: PaddedAtomicUsize::new(0),
@@ -403,6 +418,26 @@ impl<T> Producer<T> {
     #[inline]
     pub fn capacity(&self) -> usize {
         self.shared.capacity()
+    }
+
+    /// Returns the internal buffer size of the queue.
+    ///
+    /// The internal buffer size will always be greater than the
+    /// usable capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_queue::spsc;
+    ///
+    /// let (p, _) = spsc::with_capacity::<i32>(100);
+    ///
+    /// assert_eq!(p.capacity(), 100);
+    /// assert!(p.buffer_size() > p.capacity());
+    /// ```
+    #[inline]
+    pub fn buffer_size(&self) -> usize {
+        self.shared.buffer.size
     }
 
     /// Returns how many slots are immediately available for writing.
@@ -650,6 +685,26 @@ impl<T> Consumer<T> {
         self.shared.capacity()
     }
 
+    /// Returns the internal buffer size of the queue.
+    ///
+    /// The internal buffer size will always be greater than the
+    /// usable capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_queue::spsc;
+    ///
+    /// let (_, c) = spsc::with_capacity::<i32>(100);
+    ///
+    /// assert_eq!(c.capacity(), 100);
+    /// assert!(c.buffer_size() > c.capacity());
+    /// ```
+    #[inline]
+    pub fn buffer_size(&self) -> usize {
+        self.shared.buffer.size
+    }
+
     /// Returns how many slots are immediately available for reading.
     #[inline]
     pub fn peek(&self) -> usize {
@@ -730,24 +785,27 @@ impl<T> Consumer<T> {
     /// use crossbeam_queue::spsc;
     ///
     /// let (mut p, mut c) = spsc::with_capacity(2);
+    ///
+    /// // Wrap around occurs at the end of the internal buffer
+    /// for _ in 1..p.buffer_size() {
+    ///     assert_eq!(p.try_push(1), Ok(()));
+    ///     assert_eq!(c.try_pop(), Ok(1));
+    /// }
+    ///
     /// assert_eq!(p.try_push(1), Ok(()));
     /// assert_eq!(p.try_push(2), Ok(()));
-    /// assert_eq!(c.try_pop(), Ok(1));
-    /// assert_eq!(p.try_push(3), Ok(()));
-    /// assert_eq!(c.try_pop(), Ok(2));
+    /// assert_eq!(p.peek_max(), 0);
+    /// assert_eq!(c.peek_max(), 2);
     ///
-    /// // Wrap around after reaching internal buffer size 3 = 2 + 1
-    /// assert_eq!(p.try_push(4), Ok(()));
-    ///
-    /// let (s1, s2) = c.readable_slices(2);
-    /// assert_eq!(s1, &[3]);
-    /// assert_eq!(s2, &[4]);
+    /// let (s1, s2) = c.readable_slices(c.capacity());
+    /// assert_eq!(s1, &[1]);
+    /// assert_eq!(s2, &[2]);
     ///
     /// c.skip_readable(1);
-    /// assert_eq!(p.try_push(5), Ok(()));
+    /// assert_eq!(p.try_push(3), Ok(()));
     ///
-    /// let (s1, s2) = c.readable_slices(2);
-    /// assert_eq!(s1, &[4, 5]);
+    /// let (s1, s2) = c.readable_slices(c.capacity());
+    /// assert_eq!(s1, &[2, 3]);
     /// assert_eq!(s2, &[]);
     ///
     /// c.skip_readable(2);
