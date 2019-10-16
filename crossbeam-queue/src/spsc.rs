@@ -436,7 +436,7 @@ impl<T> Producer<T> {
     /// assert!(p.buffer_size() > p.capacity());
     /// ```
     #[inline]
-    pub fn buffer_size(&self) -> usize {
+    pub(crate) fn buffer_size(&self) -> usize {
         self.shared.buffer.size
     }
 
@@ -702,7 +702,7 @@ impl<T> Consumer<T> {
     /// assert!(c.buffer_size() > c.capacity());
     /// ```
     #[inline]
-    pub fn buffer_size(&self) -> usize {
+    pub(crate) fn buffer_size(&self) -> usize {
         self.shared.buffer.size
     }
 
