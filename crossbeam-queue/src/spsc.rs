@@ -598,13 +598,13 @@ impl<T: Copy + Default> Producer<T> {
         len
     }
 
-    /// Copies from a slice into the queue (blocking).
+    /// Copies from a slice into the queue (spinning).
     ///
     /// Copy all elements from the given slice into the queue.
     ///
-    /// This function blocks by looping until all elements from
+    /// This function spins by looping until all elements from
     /// the slice have been copied into the queue!
-    pub fn copy_from_slice_blocking(&mut self, src: &[T]) {
+    pub fn copy_from_slice_spin(&mut self, src: &[T]) {
         let mut write_len = 0;
         while write_len < src.len() {
             write_len += self.copy_from_slice(&src[write_len..]);
@@ -853,13 +853,13 @@ impl<T: Copy> Consumer<T> {
         len
     }
 
-    /// Copies from the queue into a slice (blocking).
+    /// Copies from the queue into a slice (spinning).
     ///
     /// Copy elements from the queue into the given slice exhaustively.
     ///
-    /// This function blocks by looping until the whole slice has been
-    /// filled with elements from the queue!
-    pub fn copy_into_slice_blocking(&mut self, dst: &mut [T]) {
+    /// This function spins by looping until the whole slice has been filled
+    /// with elements from the queue!
+    pub fn copy_into_slice_spin(&mut self, dst: &mut [T]) {
         let mut read_len = 0;
         while read_len < dst.len() {
             read_len += self.copy_into_slice(&mut dst[read_len..]);
