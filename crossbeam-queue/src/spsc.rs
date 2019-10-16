@@ -531,9 +531,9 @@ impl<T> Producer<T> {
         Ok(())
     }
 
-    /// Obtains two contiguous slices for writing.
+    /// Obtains two adjacent slices for writing.
     ///
-    /// Returns a pair of two contiguous slices with uninitialized slots for
+    /// Returns a pair of two adjacent slices with uninitialized slots for
     /// writing. The two (possibly empty) slices represent all free slots that
     /// are immediately available for writing. The first slice has to be filled
     /// before starting to write into the second slice.
@@ -543,8 +543,9 @@ impl<T> Producer<T> {
     /// only the free slots currently known to the producer are returned, not taking
     /// into account any slots that have been freed by the consumer in the meanwhile.
     ///
+    /// The total length of both slices might be greater than the requested `min_count`.
     /// Either the second or both slices might be empty. If the first slice is empty
-    /// then the queue is full.
+    /// and `min_count > 0` then the queue is full.
     pub unsafe fn writable_slices_raw(&mut self, min_count: usize) -> (&mut [T], &mut [T]) {
         let (head, writable) = self.acquire_writable(min_count);
         let (_, (n1, n2)) = self.shared.skip(head, writable);
@@ -557,16 +558,16 @@ impl<T> Producer<T> {
     /// Advances the write position.
     ///
     /// The caller is responsible that the corresponding slots have been
-    /// initialized properly upon writing.
-    pub fn skip_writable(&mut self, count_write: usize) {
-        debug_assert!(count_write <= self.peek());
-        let head = self.shared.skip(self.head(), count_write).0;
+    /// initialized properly before invoking this function.
+    pub fn skip_writable(&mut self, write_count: usize) {
+        debug_assert!(write_count <= self.peek());
+        let head = self.shared.skip(self.head(), write_count).0;
         self.update_head(head);
     }
 }
 
 impl<T: Copy + Default> Producer<T> {
-    /// Obtains two contiguous slices for writing.
+    /// Obtains two adjacent slices for writing.
     ///
     /// See also: [`writable_slices_raw`](#method.writable_slices_raw)
     #[inline]
@@ -754,7 +755,7 @@ impl<T> Consumer<T> {
         Ok(value)
     }
 
-    /// Obtains two contiguous slices for reading raw elements.
+    /// Obtains two adjacent slices for reading raw elements.
     ///
     /// The two (possibly empty) slices represent all occupied slots that are
     /// immediately available for reading. The first slice has to be read before
@@ -822,7 +823,7 @@ impl<T> Consumer<T> {
 }
 
 impl<T: Copy> Consumer<T> {
-    /// Obtains two contiguous slices for reading.
+    /// Obtains two adjacent slices for reading.
     ///
     /// See also: [`readable_slices_raw`](#method.readable_slices_raw)
     #[inline]
