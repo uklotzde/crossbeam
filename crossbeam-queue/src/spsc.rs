@@ -425,24 +425,41 @@ impl<T> Producer<T> {
         self.shared.capacity()
     }
 
-    /// Returns the internal buffer size of the queue.
+    /// Returns the current remaining contiguous capacity.
     ///
-    /// The internal buffer size will always be greater than the
-    /// usable capacity.
+    /// The remaining contiguous capacity depends on the current write position
+    /// and equals the number of available empty slots starting at the current
+    /// write position. It might be greater than the capacity, because the size
+    /// of the internal buffer is greater than the actual capacity.
+    ///
+    /// This function is marked as deprecated, because it is only provided for
+    /// testing and demonstration purposes!
     ///
     /// # Examples
     ///
     /// ```
     /// use crossbeam_queue::spsc;
     ///
-    /// let (p, _) = spsc::with_capacity::<i32>(100);
+    /// let (mut p, mut c) = spsc::with_capacity::<i32>(100);
     ///
     /// assert_eq!(p.capacity(), 100);
-    /// assert!(p.buffer_size() > p.capacity());
+    /// let max_stride_until_wrap_around = p.contiguous_capacity();
+    /// for i in 1..max_stride_until_wrap_around {
+    ///    assert!(p.try_push(i as i32).is_ok());
+    ///    assert_eq!(Ok(i as i32), c.try_pop());
+    /// }
+    ///
+    /// // One empty slot left before wrap around
+    /// assert_eq!(1, p.contiguous_capacity());
+    /// assert!(p.try_push(0).is_ok());
+    ///
+    /// // Next write position starts at the beginning of the buffer
+    /// assert_eq!(max_stride_until_wrap_around, p.contiguous_capacity());
     /// ```
     #[inline]
-    pub(crate) fn buffer_size(&self) -> usize {
-        self.shared.buffer.size
+    #[deprecated]
+    pub fn contiguous_capacity(&self) -> usize {
+        self.shared.buffer.size - self.head()
     }
 
     /// Returns how many slots are immediately available for writing.
@@ -691,26 +708,6 @@ impl<T> Consumer<T> {
         self.shared.capacity()
     }
 
-    /// Returns the internal buffer size of the queue.
-    ///
-    /// The internal buffer size will always be greater than the
-    /// usable capacity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crossbeam_queue::spsc;
-    ///
-    /// let (_, c) = spsc::with_capacity::<i32>(100);
-    ///
-    /// assert_eq!(c.capacity(), 100);
-    /// assert!(c.buffer_size() > c.capacity());
-    /// ```
-    #[inline]
-    pub(crate) fn buffer_size(&self) -> usize {
-        self.shared.buffer.size
-    }
-
     /// Returns how many slots are immediately available for reading.
     #[inline]
     pub fn peek(&self) -> usize {
@@ -793,7 +790,8 @@ impl<T> Consumer<T> {
     /// let (mut p, mut c) = spsc::with_capacity(2);
     ///
     /// // Wrap around occurs at the end of the internal buffer
-    /// for _ in 1..p.buffer_size() {
+    /// let almost_wrap_around = p.contiguous_capacity() - 1;
+    /// for _ in 0..almost_wrap_around {
     ///     assert_eq!(p.try_push(1), Ok(()));
     ///     assert_eq!(c.try_pop(), Ok(1));
     /// }
