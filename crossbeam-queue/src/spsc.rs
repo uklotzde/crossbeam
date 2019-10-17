@@ -59,7 +59,7 @@ impl PaddedAtomicUsize {
     }
 }
 
-/// The underlying buffer of the queue
+/// The underlying buffer of the queue.
 #[derive(Debug)]
 pub struct Buffer<T> {
     /// The number of slots in the buffer
@@ -481,7 +481,7 @@ impl<T> Producer<T> {
         self.acquire_writable(0).1
     }
 
-    /// Returns how many slots are available for writing given a minimum amount.
+    /// Returns how many slots are available for writing the given a minimum amount.
     ///
     /// # Examples
     ///
@@ -577,14 +577,29 @@ impl<T> Producer<T> {
         (s1, s2)
     }
 
-    /// Advances the write position.
+    /// Advances the write position (unchecked).
     ///
-    /// The caller is responsible that the corresponding slots have been
-    /// initialized properly before invoking this function.
+    /// The caller is responsible to ensure that `write_count <= self.peek()`.
+    ///
+    /// See also: [`skip_writable`](#method.skip_writable)
     pub unsafe fn skip_writable_unchecked(&mut self, write_count: usize) {
         debug_assert!(write_count <= self.peek());
         let head = self.shared.skip(self.head(), write_count).0;
         self.update_head(head);
+    }
+
+    /// Advances the write position.
+    ///
+    /// The caller is responsible that the corresponding slots have been
+    /// initialized properly before invoking this function.
+    ///
+    /// Returns the number of skipped slots.
+    ///
+    /// See also: [`skip_writable_unchecked`](#method.skip_writable_unchecked)
+    pub fn skip_writable(&mut self, write_count: usize) -> usize {
+        let write_count = write_count.min(self.peek());
+        unsafe { self.skip_writable_unchecked(write_count); }
+        write_count
     }
 }
 
@@ -714,7 +729,7 @@ impl<T> Consumer<T> {
         self.acquire_readable(0).1
     }
 
-    /// Returns how many slots are available for reading given a minimum amount.
+    /// Returns how many slots are available for reading the given a minimum amount.
     #[inline]
     pub fn peek_min(&self, min_count: usize) -> usize {
         self.acquire_readable(min_count).1
@@ -777,10 +792,25 @@ impl<T> Consumer<T> {
         (s1, s2)
     }
 
-    /// Advances the read position.
+    /// Advances the read position (unchecked).
     ///
-    /// Skips the given number of readable slots without dropping the
+    /// The caller is responsible to ensure that `read_count <= self.peek()`.
+    ///
+    /// See also: [`skip_readable`](#method.skip_readable)
+    pub unsafe fn skip_readable_unchecked(&mut self, read_count: usize) {
+        debug_assert!(read_count <= self.peek());
+        let tail = self.shared.skip(self.tail(), read_count).0;
+        self.update_tail(tail);
+    }
+
+    /// Advances the write position.
+    ///
+    /// Skip the given number of readable slots without dropping the
     /// contained values.
+    ///
+    /// Returns the number of skipped slots.
+    ///
+    /// See also: [`skip_readable_unchecked`](#method.skip_readable_unchecked)
     ///
     /// # Examples
     ///
@@ -805,23 +835,24 @@ impl<T> Consumer<T> {
     /// assert_eq!(s1, &[1]);
     /// assert_eq!(s2, &[2]);
     ///
-    /// unsafe { c.skip_readable_unchecked(1); }
+    /// c.skip_readable(1);
     /// assert_eq!(p.try_push(3), Ok(()));
     ///
     /// let (s1, s2) = c.readable_slices(c.capacity());
     /// assert_eq!(s1, &[2, 3]);
     /// assert_eq!(s2, &[]);
     ///
-    /// unsafe { c.skip_readable_unchecked(2); }
+    /// assert_eq!(1, c.skip_readable(1));
+    /// assert_eq!(1, c.skip_readable(c.capacity()));
     ///
     /// let (s1, s2) = c.readable_slices(1);
     /// assert_eq!(s1, &[]);
     /// assert_eq!(s2, &[]);
     /// ```
-    pub unsafe fn skip_readable_unchecked(&mut self, read_count: usize) {
-        debug_assert!(read_count <= self.peek());
-        let tail = self.shared.skip(self.tail(), read_count).0;
-        self.update_tail(tail);
+    pub fn skip_readable(&mut self, read_count: usize) -> usize {
+        let read_count = read_count.min(self.peek());
+        unsafe { self.skip_readable_unchecked(read_count); }
+        read_count
     }
 }
 
