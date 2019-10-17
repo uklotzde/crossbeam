@@ -99,10 +99,13 @@ impl<T> Buffer<T> {
         let data = {
             let alloc_size = Self::alloc_size(size);
             assert!(size < alloc_size, "size overflow");
-            let mut v = Vec::<T>::with_capacity(alloc_size);
+            let mut v = Vec::<T>::new();
+            v.reserve_exact(alloc_size);
             let ptr = v.as_mut_ptr();
+            // Don't run drop() on Vec yet
             mem::forget(v);
             // Skip the inserted cache line pad at the beginning of the data!
+            debug_assert!(alloc_size >= size + Self::data_cache_pad());
             unsafe { ptr.add(Self::data_cache_pad()) }
         };
         Self { data, size }
@@ -113,12 +116,14 @@ impl<T> Buffer<T> {
         let alloc_size = Self::alloc_size(self.size);
         // Account for the inserted cache line pad at the beginning of
         // the data!
+        debug_assert!(alloc_size >= self.size + Self::data_cache_pad());
         let offset = -(Self::data_cache_pad() as isize);
         unsafe {
             let ptr = self.data.offset(offset);
+            // Create a temporary, empty Vec and drop it immediately, i.e.
+            // free the uninitialized memory but don't drop the elements
             Vec::from_raw_parts(ptr, 0, alloc_size);
         }
-        // Free the uninitialized memory, i.e. don't drop the elements
         self.size = 0;
     }
 }
