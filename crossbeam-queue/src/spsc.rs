@@ -564,7 +564,7 @@ impl<T> Producer<T> {
     ///
     /// The caller is responsible that the corresponding slots have been
     /// initialized properly before invoking this function.
-    pub fn skip_writable(&mut self, write_count: usize) {
+    pub unsafe fn skip_writable_unchecked(&mut self, write_count: usize) {
         debug_assert!(write_count <= self.peek());
         let head = self.shared.skip(self.head(), write_count).0;
         self.update_head(head);
@@ -594,7 +594,7 @@ impl<T: Copy + Default> Producer<T> {
         let len = len1 + len2;
         dst1.copy_from_slice(&src[..len1]);
         dst2.copy_from_slice(&src[len1..len]);
-        self.skip_writable(len);
+        unsafe { self.skip_writable_unchecked(len); }
         len
     }
 
@@ -807,20 +807,20 @@ impl<T> Consumer<T> {
     /// assert_eq!(s1, &[1]);
     /// assert_eq!(s2, &[2]);
     ///
-    /// c.skip_readable(1);
+    /// unsafe { c.skip_readable_unchecked(1); }
     /// assert_eq!(p.try_push(3), Ok(()));
     ///
     /// let (s1, s2) = c.readable_slices(c.capacity());
     /// assert_eq!(s1, &[2, 3]);
     /// assert_eq!(s2, &[]);
     ///
-    /// c.skip_readable(2);
+    /// unsafe { c.skip_readable_unchecked(2); }
     ///
     /// let (s1, s2) = c.readable_slices(1);
     /// assert_eq!(s1, &[]);
     /// assert_eq!(s2, &[]);
     /// ```
-    pub fn skip_readable(&mut self, read_count: usize) {
+    pub unsafe fn skip_readable_unchecked(&mut self, read_count: usize) {
         debug_assert!(read_count <= self.peek());
         let tail = self.shared.skip(self.tail(), read_count).0;
         self.update_tail(tail);
@@ -849,7 +849,7 @@ impl<T: Copy> Consumer<T> {
         let len = len1 + len2;
         dst.copy_from_slice(&src1[..len1]);
         dst[len1..].copy_from_slice(&src2[..len2]);
-        self.skip_readable(len);
+        unsafe { self.skip_readable_unchecked(len); }
         len
     }
 
@@ -873,7 +873,7 @@ impl<T: Copy> Consumer<T> {
     /// Returns the number if dropped elements.
     pub fn clear(&mut self) -> usize {
         let drop_count = self.peek_max();
-        self.skip_readable(drop_count);
+        unsafe { self.skip_readable_unchecked(drop_count); }
         drop_count
     }
 }
